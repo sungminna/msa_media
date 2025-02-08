@@ -1,17 +1,31 @@
 // controllers/s3Controller.js
 import s3Manager from '../db/s3.js';
+import fileManager from '../db/sqlite.js';
+import getUserIdFromToken from '../utils/auth.js';
+
+fileManager.initialize().catch(console.error);
 
 const uploadFile = async (req, res) => {
     try {
       const { file } = req;
+      const token = req.headers.authorization?.split(' ')[1];
+      const userId = getUserIdFromToken(token)
+      if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
+      }
+
       if (!file) {
         return res.status(400).json({ error: 'no file provided' });
       }
-  
+      
       const fileName = `uploads/${Date.now()}-${file.originalname}`;
-      const uploadResult = await s3Manager.uploadFile(file, fileName);
-  
-      if (uploadResult.success) {
+      const saveResult = await fileManager.saveFileInfo(fileName, userId);
+      var uploadResult = { success: false };
+      if (saveResult) {
+        uploadResult = await s3Manager.uploadFile(file, fileName);
+      }
+      
+      if (uploadResult.success && saveResult.success) {
         res.json({ 
           message: 'upload successful', 
           data: { 
@@ -46,9 +60,19 @@ const getFile = async (req, res) => {
 const deleteFile = async (req, res) => {
     try {
       const fileName = req.query.fileName;
-      const deleteResult = await s3Manager.deleteFile(fileName);
-  
-      if (deleteResult.success) {
+
+      const token = req.headers.authorization?.split(' ')[1];
+      const userId = getUserIdFromToken(token)
+      if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
+      }
+      
+      const deleteResultDB = await fileManager.deleteFileByName(fileName, userId);
+      var deleteResult = { success: false };
+      if (deleteResultDB.success && deleteResultDB.deleted) {
+        deleteResult = await s3Manager.deleteFile(fileName);
+      }  
+      if (deleteResult.success && deleteResultDB.success && deleteResultDB.deleted) {
         res.json({ message: 'file deletion successful' });
       } else {
         res.status(500).json({ error: 'failed to delete file', details: deleteResult.error });
